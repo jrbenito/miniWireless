@@ -48,151 +48,16 @@ union ltag {
 
 uint8_t memIdAvg=0;
 
-void setup() {
-  pinMode(LEDPIN, OUTPUT);
-  digitalWrite(LEDPIN, LOW);
- 
-  delay(1000);
-  Serial.begin(115200);
-  Serial.println("Startup...");
-    
-  gStat=0;
-  char ch='0';
-  int i=0;
-  long l=0; 
-  char buf[50];
-  pinMode(wuPin,INPUT);
-  Wire.begin();
-  boolean bdone=false;  
-  pinMode(CSMEM_PIN, OUTPUT);
-  digitalWrite(CSMEM_PIN, HIGH);
-  SPI.setDataMode(SPI_MODE0);//3);
-  SPI.setClockDivider(SPI_CLOCK_DIV4);
-  SPI.begin();  
- 
-  int dly=100;
-  for(int i=0; i<12; i++) {
-    digitalWrite(LEDPIN, HIGH);
-    delay(dly);
-    digitalWrite(LEDPIN, LOW);
-    delay(dly);
-  }
+// Convert Decimal to Binary Coded Decimal (BCD)
+uint8_t dec2bcd(uint8_t num)
+{
+  return ((num/10 * 16) + (num % 10));
 }
 
-void loop() {
-  Serial.println("128Mb SPI FLASH MEMORY RFID Block READ test.....");
-  spPrintRDID();
-      delay(10);
-      fmWriteEnable();    
-      digitalWrite(CSMEM_PIN,LOW);
-      SPI.transfer(0x20);                // sector Erase
-      SPI.transfer(0);
-      SPI.transfer(0);
-      SPI.transfer(0);
-      digitalWrite(CSMEM_PIN,HIGH);
-      delay(1000);
-      Serial.println();
-      Serial.println();
-      Serial.println("SPI Flash Read 32bytes, starting at Address 0x20 (after sector erase, should be all FF's)");
-      digitalWrite(CSMEM_PIN,LOW);
-      SPI.transfer(0x13);//READ);
-      SPI.transfer(0);
-      SPI.transfer(0);
-      SPI.transfer(0);
-      SPI.transfer(0x20);//20);
-      for(int i=0x00; i<32; i++) {
-        byte b = SPI.transfer(0);
-        if(b<0x10) Serial.print("0");
-        Serial.print(b,HEX);
-        Serial.print(" ");
-      }
-      digitalWrite(CSMEM_PIN,HIGH);
-      delay(10);
-      Serial.println();
-      Serial.println();
-      Serial.println("SPI Flash pattern Write 32B at Address 0x20");
-      fmWriteEnable();
-      digitalWrite(CSMEM_PIN,LOW);
-      SPI.transfer(0x12);//write;
-      SPI.transfer(0);
-      SPI.transfer(0);
-      SPI.transfer(0);
-      SPI.transfer(0x20);//20);
-      for(int i=0x00; i<32; i++) {
-        byte b = (byte)i;
-        SPI.transfer(b);
-      }
-      digitalWrite(CSMEM_PIN,HIGH);
-      delay(10);
-      Serial.println("SPI Flash Read back 32bytes at Address 0x20 (should be 00 to 1F)");
-      digitalWrite(CSMEM_PIN,LOW);
-      SPI.transfer(0x13);//READ);
-      SPI.transfer(0);
-      SPI.transfer(0);
-      SPI.transfer(00);
-      SPI.transfer(0x20);//20);
-      for(int i=0x00; i<32; i++) {
-        byte b = SPI.transfer(0);
-        if(b<0x10) Serial.print("0");
-        Serial.print(b,HEX);
-        Serial.print(" ");
-      }
-      delay(10);
-
-      Serial.println();
-
-  Serial.println();
-  Serial.print("memIdAvg: ");
-  Serial.println(memIdAvg,HEX);
-  
-  Serial.print("mfgId=");
-  Serial.println((uint8_t)fmGetMfgId(), HEX);    // Display Manufacturer Id  
-  
-  Serial.print("deviceId=");
-  Serial.println((uint8_t)fmGetDeviceId(), HEX); // Display Device Id
-  
-  Serial.print("jedecId=");
-  Serial.println((long)fmGetJedecId(), HEX);  
-  Serial.println();
-
-  //TODO: Fix read/write issues with RTC ram---check timing in specification and such
-  //      remember 32bit is Wire buffer limit, so if you put len>32, the library will truncate
-  //NOTE: This serves as simple demonstration of RD/WR of RTC ram
-  Serial.println("Clear first 16bytes of RTC static ram, read back, write pattern/read back");
-  writeRTCmem(0,16,0);
-  printRTCmem(0,16);  
-  writeRTCmem(0,16,-1);
-  printRTCmem(0,16);  
-  
-  Serial.println();
-  Serial.println("setting new sleep time: 5-sec.");
-  clearAlarm();
-  delay(20);
-  setNewAlarm();
-  set_sleep_mode(SLEEP_MODE_PWR_DOWN);  
-  sleep_enable();
-  interrupts();
-  attachInterrupt(1,sleepHandler, FALLING);
-  Serial.println("going to sleep...");
-  delay(20);
-  sleep_mode();  //sleep now
-  //--------------- ZZZZZZ sleeping here
-  sleep_disable(); //fully awake now
-  Serial.println("waking up...");
-  detachInterrupt(1);//);
-
-  int dly=0;
-  if(memIdAvg>0x20 && memIdAvg<0xe0) {
-    Serial.println("GOT HERE!!!  RTC alarm0 interrupt is working...............");
-    dly=0x500;
-  }else
-    dly=0x50;
-  while(1) {
-    digitalWrite(LEDPIN, HIGH);
-    delay(dly);
-    digitalWrite(LEDPIN, LOW);
-    delay(dly);
-  }
+// Convert Binary Coded Decimal (BCD) to Decimal
+uint8_t bcd2dec(uint8_t num)
+{
+  return ((num/16 * 10) + (num % 16));
 }
 
 void fmGetSID() {
@@ -369,65 +234,6 @@ void writeRTCmem(int addr, int len, int pattern) {
   Wire.endTransmission();
 }
 
-void setNewAlarm() {
-  static MCP7940RTC rtc;
-  time_t t = rtc.get();
-  //Serial.print("dayofweek=");
-  //Serial.println(dayOfWeek(t));
-  // must get proper wday... TODO: Fix in library
-  
-  //Serial.print(" ");
-  Serial.print("t=");
-  Serial.print(t);
-  Serial.print(" ");
-  tmElements_t tm1;
-  breakTime(t,tm1);
-  uint8_t b=0;
-  // check tm1.Wday for differences...
-  // Must ensure Wday consistency in RTC chip!!!
-    Wire.beginTransmission(MCP7940_CTRL_ID);
-    Wire.write((uint8_t)0x03);
-    Wire.endTransmission();    
-    Wire.requestFrom(MCP7940_CTRL_ID, 1);     
-    while(Wire.available()) {
-      b = Wire.read();
-    }
-    Wire.endTransmission();
-    delay(5);
-    b &= 0xf8;
-    b |= dec2bcd(dayOfWeek(t));
-    Wire.beginTransmission(MCP7940_CTRL_ID);
-    Wire.write((uint8_t)0x03);
-    Wire.write(b);
-    Wire.endTransmission();
-  //end of RTC setting of Wday
-
-  Serial.print("tm1=");
-  Serial.print(tm1.Year);//+1970);
-  Serial.print(" ");
-  Serial.print(tm1.Month);
-  Serial.print(" ");
-  Serial.print(tm1.Wday);
-  Serial.print(" ");
-  Serial.print(tm1.Day);
-  Serial.print(" ");
-  Serial.print(tm1.Hour);
-  Serial.print(" ");
-  Serial.print(tm1.Minute);
-  Serial.print(" ");
-  Serial.print(tm1.Second);
-  t += sleepIntervalSec;
-  Serial.print("  tA=");
-  Serial.print(t);  
-  Serial.println();
-  
-  //rtc.setAlarm0(t);
-  setAlarm(t);
-  delay(10);
-  compareAlarm0();
-  loopCnt++;
-}
-
 void compareAlarm0() {
   uint8_t dmask[] = { 0x7f, 0x7f, 0x7f, 0x07, 0x3f, 0x1f };
 
@@ -522,20 +328,213 @@ void clearAlarm() {
   delay(20);
 }
  
+void setNewAlarm() {
+  static MCP7940RTC rtc;
+  time_t t = rtc.get();
+  //Serial.print("dayofweek=");
+  //Serial.println(dayOfWeek(t));
+  // must get proper wday... TODO: Fix in library
+  
+  //Serial.print(" ");
+  Serial.print("t=");
+  Serial.print(t);
+  Serial.print(" ");
+  tmElements_t tm1;
+  breakTime(t,tm1);
+  uint8_t b=0;
+  // check tm1.Wday for differences...
+  // Must ensure Wday consistency in RTC chip!!!
+    Wire.beginTransmission(MCP7940_CTRL_ID);
+    Wire.write((uint8_t)0x03);
+    Wire.endTransmission();    
+    Wire.requestFrom(MCP7940_CTRL_ID, 1);     
+    while(Wire.available()) {
+      b = Wire.read();
+    }
+    Wire.endTransmission();
+    delay(5);
+    b &= 0xf8;
+    b |= dec2bcd(dayOfWeek(t));
+    Wire.beginTransmission(MCP7940_CTRL_ID);
+    Wire.write((uint8_t)0x03);
+    Wire.write(b);
+    Wire.endTransmission();
+  //end of RTC setting of Wday
+
+  Serial.print("tm1=");
+  Serial.print(tm1.Year);//+1970);
+  Serial.print(" ");
+  Serial.print(tm1.Month);
+  Serial.print(" ");
+  Serial.print(tm1.Wday);
+  Serial.print(" ");
+  Serial.print(tm1.Day);
+  Serial.print(" ");
+  Serial.print(tm1.Hour);
+  Serial.print(" ");
+  Serial.print(tm1.Minute);
+  Serial.print(" ");
+  Serial.print(tm1.Second);
+  t += sleepIntervalSec;
+  Serial.print("  tA=");
+  Serial.print(t);  
+  Serial.println();
+  
+  //rtc.setAlarm0(t);
+  setAlarm(t);
+  delay(10);
+  compareAlarm0();
+  loopCnt++;
+}
+ 
 void sleepHandler() {
   Serial.println("Processing...");  
   gStat=1;
 }    
 
-// Convert Decimal to Binary Coded Decimal (BCD)
-uint8_t dec2bcd(uint8_t num)
-{
-  return ((num/10 * 16) + (num % 10));
+void setup() {
+  pinMode(LEDPIN, OUTPUT);
+  digitalWrite(LEDPIN, LOW);
+ 
+  delay(1000);
+  Serial.begin(115200);
+  Serial.println("Startup...");
+    
+  gStat=0;
+  char ch='0';
+  int i=0;
+  long l=0; 
+  char buf[50];
+  pinMode(wuPin,INPUT);
+  Wire.begin();
+  boolean bdone=false;  
+  pinMode(CSMEM_PIN, OUTPUT);
+  digitalWrite(CSMEM_PIN, HIGH);
+  SPI.setDataMode(SPI_MODE0);//3);
+  SPI.setClockDivider(SPI_CLOCK_DIV4);
+  SPI.begin();  
+ 
+  int dly=100;
+  for(int i=0; i<12; i++) {
+    digitalWrite(LEDPIN, HIGH);
+    delay(dly);
+    digitalWrite(LEDPIN, LOW);
+    delay(dly);
+  }
 }
 
-// Convert Binary Coded Decimal (BCD) to Decimal
-uint8_t bcd2dec(uint8_t num)
-{
-  return ((num/16 * 10) + (num % 16));
-}
+void loop() {
+  Serial.println("128Mb SPI FLASH MEMORY RFID Block READ test.....");
+  spPrintRDID();
+      delay(10);
+      fmWriteEnable();    
+      digitalWrite(CSMEM_PIN,LOW);
+      SPI.transfer(0x20);                // sector Erase
+      SPI.transfer(0);
+      SPI.transfer(0);
+      SPI.transfer(0);
+      digitalWrite(CSMEM_PIN,HIGH);
+      delay(1000);
+      Serial.println();
+      Serial.println();
+      Serial.println("SPI Flash Read 32bytes, starting at Address 0x20 (after sector erase, should be all FF's)");
+      digitalWrite(CSMEM_PIN,LOW);
+      SPI.transfer(0x13);//READ);
+      SPI.transfer(0);
+      SPI.transfer(0);
+      SPI.transfer(0);
+      SPI.transfer(0x20);//20);
+      for(int i=0x00; i<32; i++) {
+        byte b = SPI.transfer(0);
+        if(b<0x10) Serial.print("0");
+        Serial.print(b,HEX);
+        Serial.print(" ");
+      }
+      digitalWrite(CSMEM_PIN,HIGH);
+      delay(10);
+      Serial.println();
+      Serial.println();
+      Serial.println("SPI Flash pattern Write 32B at Address 0x20");
+      fmWriteEnable();
+      digitalWrite(CSMEM_PIN,LOW);
+      SPI.transfer(0x12);//write;
+      SPI.transfer(0);
+      SPI.transfer(0);
+      SPI.transfer(0);
+      SPI.transfer(0x20);//20);
+      for(int i=0x00; i<32; i++) {
+        byte b = (byte)i;
+        SPI.transfer(b);
+      }
+      digitalWrite(CSMEM_PIN,HIGH);
+      delay(10);
+      Serial.println("SPI Flash Read back 32bytes at Address 0x20 (should be 00 to 1F)");
+      digitalWrite(CSMEM_PIN,LOW);
+      SPI.transfer(0x13);//READ);
+      SPI.transfer(0);
+      SPI.transfer(0);
+      SPI.transfer(00);
+      SPI.transfer(0x20);//20);
+      for(int i=0x00; i<32; i++) {
+        byte b = SPI.transfer(0);
+        if(b<0x10) Serial.print("0");
+        Serial.print(b,HEX);
+        Serial.print(" ");
+      }
+      delay(10);
 
+      Serial.println();
+
+  Serial.println();
+  Serial.print("memIdAvg: ");
+  Serial.println(memIdAvg,HEX);
+  
+  Serial.print("mfgId=");
+  Serial.println((uint8_t)fmGetMfgId(), HEX);    // Display Manufacturer Id  
+  
+  Serial.print("deviceId=");
+  Serial.println((uint8_t)fmGetDeviceId(), HEX); // Display Device Id
+  
+  Serial.print("jedecId=");
+  Serial.println((long)fmGetJedecId(), HEX);  
+  Serial.println();
+
+  //TODO: Fix read/write issues with RTC ram---check timing in specification and such
+  //      remember 32bit is Wire buffer limit, so if you put len>32, the library will truncate
+  //NOTE: This serves as simple demonstration of RD/WR of RTC ram
+  Serial.println("Clear first 16bytes of RTC static ram, read back, write pattern/read back");
+  writeRTCmem(0,16,0);
+  printRTCmem(0,16);  
+  writeRTCmem(0,16,-1);
+  printRTCmem(0,16);  
+  
+  Serial.println();
+  Serial.println("setting new sleep time: 5-sec.");
+  clearAlarm();
+  delay(20);
+  setNewAlarm();
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN);  
+  sleep_enable();
+  interrupts();
+  attachInterrupt(1,sleepHandler, FALLING);
+  Serial.println("going to sleep...");
+  delay(20);
+  sleep_mode();  //sleep now
+  //--------------- ZZZZZZ sleeping here
+  sleep_disable(); //fully awake now
+  Serial.println("waking up...");
+  detachInterrupt(1);//);
+
+  int dly=0;
+  if(memIdAvg>0x20 && memIdAvg<0xe0) {
+    Serial.println("GOT HERE!!!  RTC alarm0 interrupt is working...............");
+    dly=0x500;
+  }else
+    dly=0x50;
+  while(1) {
+    digitalWrite(LEDPIN, HIGH);
+    delay(dly);
+    digitalWrite(LEDPIN, LOW);
+    delay(dly);
+  }
+}
